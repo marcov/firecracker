@@ -99,6 +99,8 @@ pub enum StartMicrovmError {
     EventFd,
     /// Memory regions are overlapping or mmap fails.
     GuestMemory(GuestMemoryError),
+    /// Cannot load initd due to invalid memory configuration or invalid initd image.
+    InitrdLoader(kernel_loader::Error),
     /// The kernel command line is invalid.
     KernelCmdline(String),
     /// Cannot load kernel due to invalid memory configuration or invalid kernel image.
@@ -188,6 +190,16 @@ impl Display for StartMicrovmError {
                 let mut err_msg = format!("{:?}", err);
                 err_msg = err_msg.replace("\"", "");
                 write!(f, "Invalid Memory Configuration: {}", err_msg)
+            }
+            InitrdLoader(ref err) => {
+                let mut err_msg = format!("{}", err);
+                err_msg = err_msg.replace("\"", "");
+                write!(
+                    f,
+                    "Cannot load initrd due to invalid memory configuration or invalid initrd \
+                     image. {}",
+                    err_msg
+                )
             }
             KernelCmdline(ref err) => write!(f, "Invalid kernel command line: {}", err),
             KernelLoader(ref err) => {
@@ -424,6 +436,7 @@ impl std::convert::From<StartMicrovmError> for VmmActionError {
             | DeviceManager
             | EventFd
             | GuestMemory(_)
+            | InitrdLoader(_)
             | RegisterBlockDevice(_)
             | RegisterEvent
             | RegisterMMIODevice(_)

@@ -59,6 +59,7 @@ use timerfd::{ClockId, SetTimeFlags, TimerFd, TimerState};
 
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
+use arch::InitrdInfo;
 #[cfg(target_arch = "x86_64")]
 use device_manager::legacy::PortIODeviceManager;
 #[cfg(target_arch = "aarch64")]
@@ -1013,11 +1014,30 @@ impl Vmm {
 
         let kernel_config = self.kernel_config.as_ref().ok_or(MissingKernelConfig)?;
 
+        let initrd = match &kernel_config.initrd_file {
+            Some(f) => {
+                let initrd = f.try_clone();
+                if initrd.is_err() {
+                    return Err(StartMicrovmError::InitrdLoader(
+                        kernel::loader::Error::ReadInitrd,
+                    ));
+                }
+
+                kernel_loader::load_initrd(vm_memory, &mut initrd.unwrap())
+                    .map_err(StartMicrovmError::InitrdLoader)?
+            }
+            None => InitrdInfo {
+                address: GuestAddress(0),
+                size: 0,
+            },
+        };
+
         #[cfg(target_arch = "x86_64")]
         arch::x86_64::configure_system(
             vm_memory,
             GuestAddress(arch::x86_64::layout::CMDLINE_START),
             kernel_config.cmdline.len() + 1,
+            &initrd,
             vcpus.len() as u8,
         )
         .map_err(ConfigureSystem)?;
@@ -1034,6 +1054,7 @@ impl Vmm {
                 vcpu_mpidr,
                 self.get_mmio_device_info(),
                 self.vm.get_irqchip(),
+                &initrd,
             )
             .map_err(ConfigureSystem)?;
         }
@@ -1313,6 +1334,18 @@ impl Vmm {
         let kernel_file = File::open(boot_source_cfg.kernel_image_path)
             .map_err(|e| BootSource(User, InvalidKernelPath(e)))?;
 
+        let initrd_file = match boot_source_cfg.initrd_path {
+            None => None,
+            Some(path) => Some({
+                File::open(path).map_err(|_| {
+                    VmmActionError::BootSource(
+                        ErrorKind::User,
+                        BootSourceConfigError::InvalidInitrdPath,
+                    )
+                })?
+            }),
+        };
+
         let mut cmdline = kernel_cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(
@@ -1324,6 +1357,7 @@ impl Vmm {
 
         let kernel_config = KernelConfig {
             kernel_file,
+            initrd_file,
             cmdline,
         };
         self.set_kernel_config(kernel_config);
@@ -1663,6 +1697,7 @@ mod tests {
     use std::fs::File;
     use std::io::BufRead;
     use std::io::BufReader;
+    use std::io::Write;
     use std::sync::atomic::AtomicUsize;
 
     use self::tempfile::NamedTempFile;
@@ -1716,6 +1751,7 @@ mod tests {
             let kernel_cfg = KernelConfig {
                 cmdline,
                 kernel_file,
+                initrd_file: None,
             };
             self.set_kernel_config(kernel_cfg);
         }
@@ -2244,6 +2280,7 @@ mod tests {
         vmm.set_kernel_config(KernelConfig {
             cmdline: kernel_cmdline::Cmdline::new(10),
             kernel_file: tempfile::tempfile().unwrap(),
+            initrd_file: None,
         });
         assert!(vmm.check_health().is_ok());
     }
@@ -2446,6 +2483,7 @@ mod tests {
         assert!(vmm
             .configure_boot_source(BootSourceConfig {
                 kernel_image_path: String::from("dummy-path"),
+                initrd_path: None,
                 boot_args: None
             })
             .is_err());
@@ -2453,10 +2491,13 @@ mod tests {
         // Test valid kernel path and invalid cmdline.
         let kernel_file = NamedTempFile::new().expect("Failed to create temporary kernel file.");
         let kernel_path = String::from(kernel_file.path().to_path_buf().to_str().unwrap());
+        let initrd_file = NamedTempFile::new().expect("Failed to create temporary initrd file.");
+        let initrd_path = String::from(initrd_file.path().to_path_buf().to_str().unwrap());
         let invalid_cmdline = String::from_utf8(vec![b'X'; arch::CMDLINE_MAX_SIZE + 1]).unwrap();
         assert!(vmm
             .configure_boot_source(BootSourceConfig {
                 kernel_image_path: kernel_path.clone(),
+                initrd_path: None,
                 boot_args: Some(invalid_cmdline)
             })
             .is_err());
@@ -2465,12 +2506,39 @@ mod tests {
         assert!(vmm
             .configure_boot_source(BootSourceConfig {
                 kernel_image_path: kernel_path.clone(),
+                initrd_path: None,
                 boot_args: None
             })
             .is_ok());
         assert!(vmm
             .configure_boot_source(BootSourceConfig {
                 kernel_image_path: kernel_path.clone(),
+                initrd_path: None,
+                boot_args: Some(String::from("reboot=k"))
+            })
+            .is_ok());
+
+        // Test invalid initrd path
+        assert!(vmm
+            .configure_boot_source(BootSourceConfig {
+                kernel_image_path: kernel_path.clone(),
+                initrd_path: Some(String::from("dummy-path")),
+                boot_args: None
+            })
+            .is_err());
+
+        // Test valid configuration + initrd.
+        assert!(vmm
+            .configure_boot_source(BootSourceConfig {
+                kernel_image_path: kernel_path.clone(),
+                initrd_path: Some(initrd_path.clone()),
+                boot_args: None
+            })
+            .is_ok());
+        assert!(vmm
+            .configure_boot_source(BootSourceConfig {
+                kernel_image_path: kernel_path.clone(),
+                initrd_path: Some(initrd_path.clone()),
                 boot_args: Some(String::from("reboot=k"))
             })
             .is_ok());
@@ -2480,6 +2548,7 @@ mod tests {
         assert!(vmm
             .configure_boot_source(BootSourceConfig {
                 kernel_image_path: kernel_path.clone(),
+                initrd_path: None,
                 boot_args: None
             })
             .is_err());
@@ -2742,7 +2811,7 @@ mod tests {
         assert!(vmm.vm.memory().is_some());
 
         #[cfg(target_arch = "x86_64")]
-        // `KVM_CREATE_VCPU` fails if the irqchip is not created beforehand. This is x86_64 speciifc.
+        // `KVM_CREATE_VCPU` fails if the irqchip is not created beforehand. This is x86_64 specific.
         vmm.vm
             .setup_irqchip()
             .expect("Cannot create IRQCHIP or PIT");
@@ -2819,6 +2888,75 @@ mod tests {
         assert!(vmm.configure_system(&Vec::new()).is_ok());
 
         vmm.stdin_handle.lock().set_canon_mode().unwrap();
+    }
+
+    #[test]
+    fn test_configure_system_with_initrd() {
+        let mut vmm = create_vmm_object(InstanceState::Uninitialized);
+        vmm.default_kernel_config(None);
+
+        let mut initrd_temp_file =
+            NamedTempFile::new().expect("Failed to create temporary initrd file.");
+        initrd_temp_file
+            .write_all(b"This is a nice initrd")
+            .expect("Cannot write temporary initrd file");
+        let initrd_path = String::from(initrd_temp_file.path().to_path_buf().to_str().unwrap());
+        let initrd_file = File::open(initrd_path).expect("Cannot open initrd file");
+
+        vmm.kernel_config = {
+            let cfg = vmm.kernel_config.unwrap();
+            Some(KernelConfig {
+                kernel_file: cfg.kernel_file,
+                initrd_file: Some(initrd_file),
+                cmdline: cfg.cmdline,
+            })
+        };
+
+        assert!(vmm.init_guest_memory().is_ok());
+        assert!(vmm.vm.memory().is_some());
+
+        // We need this so that configure_system finds a properly setup GIC device
+        #[cfg(target_arch = "aarch64")]
+        assert!(vmm.vm.setup_irqchip(1).is_ok());
+
+        assert!(vmm.configure_system(&Vec::new()).is_ok());
+        vmm.stdin_handle.lock().set_canon_mode().unwrap();
+    }
+
+    #[test]
+    fn test_configure_system_with_empty_initrd() {
+        let mut vmm = create_vmm_object(InstanceState::Uninitialized);
+        vmm.default_kernel_config(None);
+
+        let initrd_temp_file =
+            NamedTempFile::new().expect("Failed to create temporary initrd file.");
+        let initrd_path = String::from(initrd_temp_file.path().to_path_buf().to_str().unwrap());
+        let initrd_file = File::open(initrd_path).expect("Cannot open initrd file");
+
+        vmm.kernel_config = {
+            let cfg = vmm.kernel_config.unwrap();
+            Some(KernelConfig {
+                kernel_file: cfg.kernel_file,
+                initrd_file: Some(initrd_file),
+                cmdline: cfg.cmdline,
+            })
+        };
+
+        assert!(vmm.init_guest_memory().is_ok());
+        assert!(vmm.vm.memory().is_some());
+
+        // We need this so that configure_system finds a properly setup GIC device
+        #[cfg(target_arch = "aarch64")]
+        assert!(vmm.vm.setup_irqchip(1).is_ok());
+
+        let err = vmm
+            .configure_system(&Vec::new())
+            .expect_err("Expected an initrd load error");
+
+        assert_eq!(
+            err.to_string(),
+            StartMicrovmError::InitrdLoader(kernel_loader::Error::ReadInitrd).to_string()
+        );
     }
 
     #[test]

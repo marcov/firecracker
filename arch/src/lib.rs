@@ -50,6 +50,14 @@ pub enum DeviceType {
     RTC,
 }
 
+/// Type for passing information about the initrd in the guest memory.
+pub struct InitrdInfo {
+    /// Load address of initrd in guest memory
+    pub address: memory_model::GuestAddress,
+    /// Size of initrd in guest memory
+    pub size: usize,
+}
+
 impl fmt::Display for DeviceType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)

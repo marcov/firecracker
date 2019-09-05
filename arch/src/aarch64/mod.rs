@@ -51,6 +51,8 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     vcpu_mpidr: Vec<u64>,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
     gic_device: &Box<dyn GICDevice>,
+    initrd_addr: GuestAddress,
+    initrd_size: usize,
 ) -> super::Result<()> {
     fdt::create_fdt(
         guest_mem,
@@ -58,6 +60,8 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
         cmdline_cstring,
         device_info,
         gic_device,
+        initrd_addr,
+        initrd_size,
     )
     .map_err(Error::SetupFDT)?;
     Ok(())
@@ -73,8 +77,8 @@ pub fn get_kernel_start() -> usize {
     layout::DRAM_MEM_START
 }
 
-// Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr(mem: &GuestMemory) -> usize {
+/// Returns the memory address where the flattened device tree blob is loaded.
+pub fn get_fdt_addr(mem: &GuestMemory) -> usize {
     // If the memory allocated is smaller than the size allocated for the FDT,
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.

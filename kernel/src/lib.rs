@@ -8,5 +8,6 @@
 pub mod cmdline;
 pub mod loader;
 
+extern crate arch;
 extern crate memory_model;
 extern crate utils;
