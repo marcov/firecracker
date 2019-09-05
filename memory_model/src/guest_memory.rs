@@ -139,6 +139,15 @@ impl GuestMemory {
         self.regions.len()
     }
 
+    /// Returns the size region identified by index
+    pub fn region_size(&self, index: usize) -> usize {
+        if index >= self.regions.len() {
+            return 0;
+        }
+
+        self.regions[index].mapping.size()
+    }
+
     /// Perform the specified action on each region's addresses.
     pub fn with_regions<F, E>(&self, cb: F) -> result::Result<(), E>
     where

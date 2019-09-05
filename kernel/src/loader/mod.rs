@@ -30,11 +30,14 @@ pub enum Error {
     InvalidProgramHeaderSize,
     InvalidProgramHeaderOffset,
     InvalidProgramHeaderAddress,
+    ReadInitrd,
     ReadKernelDataStruct(&'static str),
     ReadKernelImage,
+    SeekInitrd,
     SeekKernelStart,
     SeekKernelImage,
     SeekProgramHeader,
+    SizeInitrd,
 }
 
 impl fmt::Display for Error {
@@ -49,13 +52,16 @@ impl fmt::Display for Error {
                 Error::InvalidProgramHeaderSize => "Invalid ELF program header size",
                 Error::InvalidProgramHeaderOffset => "Invalid ELF program header offset",
                 Error::InvalidProgramHeaderAddress => "Invalid ELF program header address",
+                Error::ReadInitrd => "Failed to read initrd image",
                 Error::ReadKernelDataStruct(ref e) => e,
                 Error::ReadKernelImage => "Failed to write kernel image to guest memory",
                 Error::SeekKernelStart => {
                     "Failed to seek to file offset as pointed by the ELF program header"
                 }
                 Error::SeekKernelImage => "Failed to seek to offset of kernel image",
+                Error::SeekInitrd => "Failed to seek initrd image",
                 Error::SeekProgramHeader => "Failed to seek to ELF program header",
+                Error::SizeInitrd => "Initrd size does not fit in guest memory",
             }
         )
     }
@@ -256,6 +262,44 @@ pub fn load_cmdline(
         .map_err(|_| CmdlineError::CommandLineCopy)?;
 
     Ok(())
+}
+
+/// Loads the initrd from a file into the given memory slice.
+///
+/// * `guest_mem` - The guest memory region the initrd is written to.
+/// * `initrd_image` - Input initrd image.
+///
+/// Returns the entry address of the initrd and its length as a tuple
+pub fn load_initrd<F>(
+    guest_mem: &GuestMemory,
+    initrd_image: &mut F,
+) -> Result<(GuestAddress, usize)>
+where
+    F: Read + Seek,
+{
+    let load_bytes = initrd_image
+        .seek(SeekFrom::End(0))
+        .map_err(|_| Error::SeekInitrd)? as usize;
+
+    const PAGE_SIZE: usize = 4096;
+    let align_to_pagesize = |address| address & !(PAGE_SIZE - 1);
+
+    initrd_image
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| Error::SeekInitrd)?;
+
+    let region_size: usize = guest_mem.region_size(0);
+
+    if region_size < load_bytes {
+        return Err(Error::SizeInitrd);
+    }
+    let load_addr: usize = align_to_pagesize(region_size - load_bytes);
+
+    guest_mem
+        .read_to_memory(GuestAddress(load_addr), initrd_image, load_bytes)
+        .map_err(|_| Error::ReadInitrd)?;
+
+    Ok((GuestAddress(load_addr), load_bytes))
 }
 
 #[cfg(test)]

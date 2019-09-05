@@ -742,6 +742,7 @@ impl Drop for EpollContext {
 struct KernelConfig {
     cmdline: kernel_cmdline::Cmdline,
     kernel_file: File,
+    initrd_file: Option<File>,
     #[cfg(target_arch = "x86_64")]
     cmdline_addr: GuestAddress,
 }
@@ -1323,10 +1324,10 @@ impl Vmm {
         Ok(entry_addr)
     }
 
-    fn configure_system(&self) -> std::result::Result<(), StartMicrovmError> {
+    fn configure_system(&mut self) -> std::result::Result<(), StartMicrovmError> {
         use StartMicrovmError::*;
 
-        let kernel_config = self.kernel_config.as_ref().ok_or(MissingKernelConfig)?;
+        let kernel_config = self.kernel_config.as_mut().ok_or(MissingKernelConfig)?;
 
         let vm_memory = self.vm.get_memory().ok_or(GuestMemory(
             memory_model::GuestMemoryError::MemoryNotInitialized,
@@ -1337,13 +1338,26 @@ impl Vmm {
         let vcpu_count = self.vm_config.vcpu_count.ok_or(VcpusNotConfigured)?;
 
         #[cfg(target_arch = "x86_64")]
-        arch::x86_64::configure_system(
-            vm_memory,
-            kernel_config.cmdline_addr,
-            kernel_config.cmdline.len() + 1,
-            vcpu_count,
-        )
-        .map_err(ConfigureSystem)?;
+        {
+            let initrd_file: &mut Option<File> = &mut kernel_config.initrd_file;
+
+            let (initrd_addr, initrd_size) = if let Some(ref mut initrd_file) = initrd_file {
+                kernel_loader::load_initrd(vm_memory, initrd_file)
+                    .map_err(|e| StartMicrovmError::KernelLoader(e))?
+            } else {
+                (GuestAddress(0), 0)
+            };
+
+            arch::x86_64::configure_system(
+                vm_memory,
+                kernel_config.cmdline_addr,
+                kernel_config.cmdline.len() + 1,
+                initrd_addr,
+                initrd_size,
+                vcpu_count,
+            )
+            .map_err(ConfigureSystem)?;
+        }
 
         #[cfg(target_arch = "aarch64")]
         {
@@ -1606,6 +1620,7 @@ impl Vmm {
     fn configure_boot_source(
         &mut self,
         kernel_image_path: String,
+        initrd_path: Option<String>,
         kernel_cmdline: Option<String>,
     ) -> std::result::Result<VmmData, VmmActionError> {
         use BootSourceConfigError::{
@@ -1621,6 +1636,18 @@ impl Vmm {
         let kernel_file =
             File::open(kernel_image_path).map_err(|_| BootSource(User, InvalidKernelPath))?;
 
+        let initrd_file = match initrd_path {
+            None => None,
+            Some(path) => Some({
+                File::open(path).map_err(|_| {
+                    VmmActionError::BootSource(
+                        ErrorKind::User,
+                        BootSourceConfigError::InvalidInitrdPath,
+                    )
+                })?
+            }),
+        };
+
         let mut cmdline = kernel_cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(kernel_cmdline.unwrap_or_else(|| String::from(DEFAULT_KERNEL_CMDLINE)))
@@ -1628,6 +1655,7 @@ impl Vmm {
 
         let kernel_config = KernelConfig {
             kernel_file,
+            initrd_file,
             cmdline,
             #[cfg(target_arch = "x86_64")]
             cmdline_addr: GuestAddress(arch::x86_64::layout::CMDLINE_START),
@@ -1934,6 +1962,7 @@ impl Vmm {
                 Vmm::send_response(
                     self.configure_boot_source(
                         boot_source_body.kernel_image_path,
+                        boot_source_body.initrd_path,
                         boot_source_body.boot_args,
                     ),
                     sender,
@@ -2142,6 +2171,7 @@ mod tests {
             let kernel_cfg = KernelConfig {
                 cmdline,
                 kernel_file,
+                initrd_file: None,
                 #[cfg(target_arch = "x86_64")]
                 cmdline_addr: GuestAddress(arch::x86_64::layout::CMDLINE_START),
             };
@@ -2685,6 +2715,7 @@ mod tests {
             cmdline_addr: dummy_addr,
             cmdline: kernel_cmdline::Cmdline::new(10),
             kernel_file: tempfile::tempfile().unwrap(),
+            initrd_file: None,
         });
         assert!(vmm.check_health().is_ok());
     }
@@ -2875,27 +2906,43 @@ mod tests {
 
         // Test invalid kernel path.
         assert!(vmm
-            .configure_boot_source(String::from("dummy-path"), None)
+            .configure_boot_source(String::from("dummy-path"), None, None)
             .is_err());
 
         // Test valid kernel path and invalid cmdline.
         let kernel_file = NamedTempFile::new().expect("Failed to create temporary kernel file.");
         let kernel_path = String::from(kernel_file.path().to_path_buf().to_str().unwrap());
+        let initrd_file = NamedTempFile::new().expect("Failed to create temporary initrd file.");
+        let initrd_path = String::from(initrd_file.path().to_path_buf().to_str().unwrap());
         let invalid_cmdline = String::from_utf8(vec![b'X'; arch::CMDLINE_MAX_SIZE + 1]).unwrap();
         assert!(vmm
-            .configure_boot_source(kernel_path.clone(), Some(invalid_cmdline))
+            .configure_boot_source(kernel_path.clone(), None, Some(invalid_cmdline))
             .is_err());
 
         // Test valid configuration.
-        assert!(vmm.configure_boot_source(kernel_path.clone(), None).is_ok());
         assert!(vmm
-            .configure_boot_source(kernel_path.clone(), Some(String::from("reboot=k")))
+            .configure_boot_source(kernel_path.clone(), None, None)
+            .is_ok());
+        assert!(vmm
+            .configure_boot_source(kernel_path.clone(), None, Some(String::from("reboot=k")))
+            .is_ok());
+
+        // Test valid configuration + initrd.
+        assert!(vmm
+            .configure_boot_source(kernel_path.clone(), Some(initrd_path.clone()), None)
+            .is_ok());
+        assert!(vmm
+            .configure_boot_source(
+                kernel_path.clone(),
+                Some(initrd_path.clone()),
+                Some(String::from("reboot=k"))
+            )
             .is_ok());
 
         // Test valid configuration after boot (should fail).
         vmm.set_instance_state(InstanceState::Running);
         assert!(vmm
-            .configure_boot_source(kernel_path.clone(), None)
+            .configure_boot_source(kernel_path.clone(), None, None)
             .is_err());
     }
 
