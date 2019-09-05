@@ -139,6 +139,15 @@ impl GuestMemory {
         self.regions.len()
     }
 
+    /// Returns the size region identified by index
+    pub fn region_size(&self, index: usize) -> usize {
+        if index >= self.regions.len() {
+            return 0;
+        }
+
+        self.regions[index].mapping.size()
+    }
+
     /// Perform the specified action on each region's addresses.
     pub fn with_regions<F, E>(&self, cb: F) -> result::Result<(), E>
     where
@@ -641,5 +650,15 @@ mod tests {
             ),
             3
         );
+    }
+
+    #[test]
+    fn test_region_size() {
+        let start_addr1 = GuestAddress(0x0);
+        let start_addr2 = GuestAddress(0x1000);
+        let mem = GuestMemory::new(&[(start_addr1, 0x100), (start_addr2, 0x400)]).unwrap();
+
+        assert_eq!(mem.region_size(0), 0x100);
+        assert_eq!(mem.region_size(1), 0x400);
     }
 }

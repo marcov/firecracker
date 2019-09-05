@@ -29,13 +29,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_into_parsed_request() {
+    fn test_into_parsed_request_same() {
         let body = BootSourceConfig {
             kernel_image_path: String::from("/foo/bar"),
+            initrd_path: None,
             boot_args: Some(String::from("foobar")),
         };
         let same_body = BootSourceConfig {
             kernel_image_path: String::from("/foo/bar"),
+            initrd_path: None,
             boot_args: Some(String::from("foobar")),
         };
         let (sender, receiver) = oneshot::channel();
@@ -43,6 +45,27 @@ mod tests {
             .into_parsed_request(None, Method::Put)
             .eq(&Ok(ParsedRequest::Sync(
                 VmmAction::ConfigureBootSource(same_body, sender),
+                receiver
+            ))))
+    }
+
+    #[test]
+    fn test_into_parsed_request_different() {
+        let body = BootSourceConfig {
+            kernel_image_path: String::from("/foo/bar"),
+            initrd_path: None,
+            boot_args: Some(String::from("foobar")),
+        };
+        let initrd_body = BootSourceConfig {
+            kernel_image_path: String::from("/foo/bar"),
+            initrd_path: Some(String::from("/bar/baz")),
+            boot_args: Some(String::from("foobar")),
+        };
+        let (sender, receiver) = oneshot::channel();
+        assert!(!body
+            .into_parsed_request(None, Method::Put)
+            .eq(&Ok(ParsedRequest::Sync(
+                VmmAction::ConfigureBootSource(initrd_body, sender),
                 receiver
             ))))
     }

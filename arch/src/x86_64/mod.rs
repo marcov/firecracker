@@ -96,6 +96,8 @@ pub fn configure_system(
     guest_mem: &GuestMemory,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
+    initrd_addr: GuestAddress,
+    initrd_size: usize,
     num_cpus: u8,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
@@ -118,6 +120,8 @@ pub fn configure_system(
     params.0.hdr.cmd_line_ptr = cmdline_addr.offset() as u32;
     params.0.hdr.cmdline_size = cmdline_size as u32;
     params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
+    params.0.hdr.ramdisk_image = initrd_addr.offset() as u32;
+    params.0.hdr.ramdisk_size = initrd_size as u32;
 
     add_e820_entry(&mut params.0, 0, EBDA_START, E820_RAM)?;
 
@@ -210,7 +214,7 @@ mod tests {
     fn test_system_configuration() {
         let no_vcpus = 4;
         let gm = GuestMemory::new(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let config_err = configure_system(&gm, GuestAddress(0), 0, 1);
+        let config_err = configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, 1);
         assert!(config_err.is_err());
         assert_eq!(
             config_err.unwrap_err(),
@@ -221,19 +225,19 @@ mod tests {
         let mem_size = 128 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
     }
 
     #[test]
