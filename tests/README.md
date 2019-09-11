@@ -91,6 +91,7 @@ s3://<bucket-url>/img/
             <optional_kernel_name.>vmlinux.bin
         fsfiles/
             <rootfs_name>rootfs.ext4
+            <optional_initrd_name.>initrd.img
             <other_fsfile_n>
             ...
         <other_resource_n>
@@ -171,7 +172,7 @@ tools/devtool test
 ## FAQ
 
 `Q1:`
-*I have a shell script that runs my tests and I don't want to rewrite it.*  
+*I have a shell script that runs my tests and I don't want to rewrite it.*
 `A1:`
 Insofar as it makes sense, you should write it as a python test function.
 However, you can always call the script from a shim python test function. You
@@ -181,20 +182,20 @@ as part of your test.
 
 `Q2:`
 *I want to add more tests that I don't want to commit to the Firecracker
-repository.*  
+repository.*
 `A2:`
 Before a testrun or test session, just add your test directory under `tests/`.
 `pytest` will discover all tests in this tree.
 
 `Q3:`
-*I want to have my own test fixtures, and not commit them in the repo.*  
+*I want to have my own test fixtures, and not commit them in the repo.*
 `A3:`
 Add a `conftest.py` file in your test directory, and place your fixtures there.
 `pytest` will bring them into scope for all your tests.
 
 `Q4:`
 *I want to use more/other microvm test images, but I don't want to add them to
-the common s3 bucket.*  
+the common s3 bucket.*
 `A4:`
 There are two options to achieve this:
 

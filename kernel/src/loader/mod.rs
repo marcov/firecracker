@@ -341,12 +341,41 @@ mod tests {
     }
 
     #[test]
+    // Tests that loading the initrd is successful on different archs.
+    fn test_load_initrd() {
+        let gm = create_guest_mem();
+        let image = make_test_bin();
+        /*
+        assert_eq!(
+            Ok((GuestAddress(load_addr), image.len())),
+            load_initrd(&gm, &mut Cursor::new(&image))
+        );
+        */
+
+        let res = load_initrd(&gm, &mut Cursor::new(&image));
+        assert!(res.is_ok());
+        let (load_address, load_len) = res.unwrap();
+        assert!(gm.address_in_range(load_address));
+        assert_eq!(load_len, image.len());
+    }
+
+    #[test]
     fn test_load_kernel_no_memory() {
         let gm = GuestMemory::new(&[(GuestAddress(0x0), 79)]).unwrap();
         let image = make_test_bin();
         assert_eq!(
             Err(Error::ReadKernelImage),
             load_kernel(&gm, &mut Cursor::new(&image), 0)
+        );
+    }
+
+    #[test]
+    fn test_load_initrd_no_memory() {
+        let gm = GuestMemory::new(&[(GuestAddress(0x0), 79)]).unwrap();
+        let image = make_test_bin();
+        assert_eq!(
+            Err(Error::SizeInitrd),
+            load_initrd(&gm, &mut Cursor::new(&image))
         );
     }
 
