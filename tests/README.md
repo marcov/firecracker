@@ -89,6 +89,7 @@ s3://<bucket-url>/img/
     <microvm_test_image_folder_n>/
         kernel/
             <optional_kernel_name.>vmlinux.bin
+            <optional_initrd_name.>initrd.img
         fsfiles/
             <rootfs_name>rootfs.ext4
             <other_fsfile_n>

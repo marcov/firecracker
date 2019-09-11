@@ -27,6 +27,7 @@ class MicrovmImageS3Fetcher:
         <microvm_image_folder_n>/
             kernel/
                 <optional_kernel_name>vmlinux.bin
+                <optional_initrd_name>initrd.img
             fsfiles/
                 <rootfs_file_name>rootfs.ext4
                 <other_fsfile_n>
@@ -55,6 +56,7 @@ class MicrovmImageS3Fetcher:
     MICROVM_IMAGE_KERNEL_RELPATH = 'kernel/'
     MICROVM_IMAGE_BLOCKDEV_RELPATH = 'fsfiles/'
     MICROVM_IMAGE_KERNEL_FILE_SUFFIX = r'vmlinux.bin'
+    MICROVM_IMAGE_INITRD_FILE_SUFFIX = r'initrd.img'
     MICROVM_IMAGE_ROOTFS_FILE_SUFFIX = r'rootfs.ext4'
     MICROVM_IMAGE_SSH_KEY_SUFFIX = r'.id_rsa'
 
@@ -142,12 +144,31 @@ class MicrovmImageS3Fetcher:
 
             if not os.path.exists(microvm_dest_path):
                 copyfile(resource_local_path, microvm_dest_path)
+                """"
+                Disclaimer: Ugly HACK...!
+
+                While an initrd.img is missing on the S3 bucket, place a copy of
+                it in the local ubuntu_with_ssh/kernel/ image folder, and then run
+                initrd tests using the "test_microvm_with_ssh" fixture.
+                """
+                if microvm_dest_path.endswith(self.MICROVM_IMAGE_KERNEL_FILE_SUFFIX) and  \
+                   resource_local_path.find('ubuntu_with_ssh') > 0:
+                    src_initrd = resource_local_path.replace(
+                        self.MICROVM_IMAGE_KERNEL_FILE_SUFFIX, self.MICROVM_IMAGE_INITRD_FILE_SUFFIX)
+                    dest_initrd = microvm_dest_path.replace(
+                        self.MICROVM_IMAGE_KERNEL_FILE_SUFFIX, self.MICROVM_IMAGE_INITRD_FILE_SUFFIX)
+                    copyfile(src_initrd, dest_initrd)
+                    microvm.initrd_file = dest_initrd
+                """ END OF HACK """
 
             if resource_key.endswith(self.MICROVM_IMAGE_KERNEL_FILE_SUFFIX):
                 microvm.kernel_file = microvm_dest_path
 
             if resource_key.endswith(self.MICROVM_IMAGE_ROOTFS_FILE_SUFFIX):
                 microvm.rootfs_file = microvm_dest_path
+
+            if resource_key.endswith(self.MICROVM_IMAGE_INITRD_FILE_SUFFIX):
+                microvm.initrd_file = microvm_dest_path
 
             if resource_key.endswith(self.MICROVM_IMAGE_SSH_KEY_SUFFIX):
                 # Add the key path to the config dictionary and set
@@ -192,6 +213,9 @@ class MicrovmImageS3Fetcher:
 
             if resource_key.endswith(self.MICROVM_IMAGE_ROOTFS_FILE_SUFFIX):
                 to_microvm.rootfs_file = microvm_dest_path
+
+            if resource_key.endswith(self.MICROVM_IMAGE_INITRD_FILE_SUFFIX):
+                to_microvm.initrd_file = microvm_dest_path
 
             if resource_key.endswith(self.MICROVM_IMAGE_SSH_KEY_SUFFIX):
                 # Add the key path to the config dictionary and set
