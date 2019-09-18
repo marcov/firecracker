@@ -3,5 +3,6 @@ name = "kernel"
 version = "0.1.0"
 
 [dependencies]
+arch = { path = "../arch" }
 memory_model = { path = "../memory_model" }
 sys_util = { path = "../sys_util" }

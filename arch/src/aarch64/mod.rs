@@ -55,7 +55,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
         u32::from(num_cpus),
         cmdline_cstring,
         device_info,
-        initrd_start,
+        initrd_addr,
         initrd_size,
     )
     .map_err(Error::SetupFDT)?;
@@ -73,7 +73,7 @@ pub fn get_kernel_start() -> usize {
 }
 
 // Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr(mem: &GuestMemory) -> usize {
+pub fn get_fdt_addr(mem: &GuestMemory) -> usize {
     // If the memory allocated is smaller than the size allocated for the FDT,
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.

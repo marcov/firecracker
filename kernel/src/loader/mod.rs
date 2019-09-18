@@ -322,7 +322,7 @@ where
         .seek(SeekFrom::Start(0))
         .map_err(|_| Error::SeekInitrd)?;
 
-    let fdt_address = GuestAddress(get_fdt_addr(&guest_mem)).offset();
+    let fdt_address = GuestAddress(arch::get_fdt_addr(&guest_mem)).offset();
 
     let load_addr: usize = align_to_pagesize(fdt_address - load_bytes);
 

@@ -346,8 +346,8 @@ fn create_chosen_node(
 ) -> Result<()> {
     append_begin_node(fdt, "chosen")?;
     append_property_cstring(fdt, "bootargs", cmdline)?;
-    append_property_u64(fdt, "linux,initrd-start", initrd_start)?;
-    append_property_u64(fdt, "linux,initrd-end", (initrd_start as u64) + initrd_size)?;
+    append_property_u64(fdt, "linux,initrd-start", initrd_addr)?;
+    append_property_u64(fdt, "linux,initrd-end", initrd_addr + initrd_size as u64)?;
     append_end_node(fdt)?;
 
     Ok(())
