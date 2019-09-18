@@ -3466,7 +3466,7 @@ mod tests {
         let mut initrd_temp_file =
             NamedTempFile::new().expect("Failed to create temporary initrd file.");
         initrd_temp_file
-            .write(b"This is a nice initrd")
+            .write_all(b"This is a nice initrd")
             .expect("Cannot write temporary initrd file");
         let initrd_path = String::from(initrd_temp_file.path().to_path_buf().to_str().unwrap());
         let initrd_file = File::open(initrd_path).expect("Cannot open kernel file");

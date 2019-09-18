@@ -46,9 +46,18 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     cmdline_cstring: &CStr,
     num_cpus: u8,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
+    initrd_addr: GuestAddress,
+    initrd_size: usize,
 ) -> super::Result<()> {
-    fdt::create_fdt(guest_mem, u32::from(num_cpus), cmdline_cstring, device_info)
-        .map_err(Error::SetupFDT)?;
+    fdt::create_fdt(
+        guest_mem,
+        u32::from(num_cpus),
+        cmdline_cstring,
+        device_info,
+        initrd_addr,
+        initrd_size,
+    )
+    .map_err(Error::SetupFDT)?;
     Ok(())
 }
 
@@ -62,8 +71,8 @@ pub fn get_kernel_start() -> usize {
     layout::DRAM_MEM_START
 }
 
-// Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr(mem: &GuestMemory) -> usize {
+/// Returns the memory address where the flattened device tree blob is loaded.
+pub fn get_fdt_addr(mem: &GuestMemory) -> usize {
     // If the memory allocated is smaller than the size allocated for the FDT,
     // we return the start of the DRAM so that
     // we allow the code to try and load the FDT.

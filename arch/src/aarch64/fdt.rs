@@ -91,6 +91,8 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
     num_cpus: u32,
     cmdline: &CStr,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
+    initrd_start: GuestAddress,
+    initrd_size: usize,
 ) -> Result<(Vec<u8>)> {
     // Alocate stuff necessary for the holding the blob.
     let mut fdt = vec![0; FDT_MAX_SIZE];
@@ -113,7 +115,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
     append_property_u32(&mut fdt, "interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, num_cpus)?;
     create_memory_node(&mut fdt, guest_mem)?;
-    create_chosen_node(&mut fdt, cmdline)?;
+    create_chosen_node(&mut fdt, cmdline, initrd_start.offset() as u64, initrd_size)?;
     create_gic_node(&mut fdt, u64::from(num_cpus))?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;
@@ -347,9 +349,18 @@ fn create_memory_node(fdt: &mut Vec<u8>, guest_mem: &GuestMemory) -> Result<()> 
     Ok(())
 }
 
-fn create_chosen_node(fdt: &mut Vec<u8>, cmdline: &CStr) -> Result<()> {
+fn create_chosen_node(
+    fdt: &mut Vec<u8>,
+    cmdline: &CStr,
+    initrd_addr: u64,
+    initrd_size: usize,
+) -> Result<()> {
     append_begin_node(fdt, "chosen")?;
     append_property_cstring(fdt, "bootargs", cmdline)?;
+    if initrd_size > 0 {
+        append_property_u64(fdt, "linux,initrd-start", initrd_addr)?;
+        append_property_u64(fdt, "linux,initrd-end", initrd_addr + initrd_size as u64)?;
+    }
     append_end_node(fdt)?;
 
     Ok(())
@@ -596,6 +607,8 @@ mod tests {
             1,
             &CString::new("console=tty0").unwrap(),
             Some(&dev_info),
+            GuestAddress(0),
+            0,
         )
         .is_ok())
     }
@@ -609,6 +622,8 @@ mod tests {
             1,
             &CString::new("console=tty0").unwrap(),
             None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
+            GuestAddress(0),
+            0,
         )
         .unwrap();
 
@@ -628,6 +643,48 @@ mod tests {
         */
 
         let bytes = include_bytes!("output.dtb");
+        let pos = 4;
+        let val = layout::FDT_MAX_SIZE;
+        let mut buf = vec![];
+        buf.extend_from_slice(bytes);
+
+        set_size(&mut buf, pos, val);
+        set_size(&mut dtb, pos, val);
+        let original_fdt = device_tree::DeviceTree::load(&buf).unwrap();
+        let generated_fdt = device_tree::DeviceTree::load(&dtb).unwrap();
+        assert!(format!("{:?}", original_fdt) == format!("{:?}", generated_fdt));
+    }
+
+    #[test]
+    fn test_create_fdt_with_initrd() {
+        let regions = arch_memory_regions(layout::FDT_MAX_SIZE + 0x1000);
+        let mem = GuestMemory::new(&regions).expect("Cannot initialize memory");
+        let mut dtb = create_fdt(
+            &mem,
+            1,
+            &CString::new("console=tty0").unwrap(),
+            None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
+            GuestAddress(0x10000000),
+            0x1000,
+        )
+        .unwrap();
+
+        /* Use this code when wanting to generate a new DTB sample.
+        {
+            use std::fs;
+            use std::io::Write;
+            use std::path::PathBuf;
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(path.join("src/aarch64/output_with_initrd.dtb"))
+                .unwrap();
+            output.write_all(&dtb).unwrap();
+        }
+        */
+
+        let bytes = include_bytes!("output_with_initrd.dtb");
         let pos = 4;
         let val = layout::FDT_MAX_SIZE;
         let mut buf = vec![];

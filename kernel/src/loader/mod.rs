@@ -17,6 +17,8 @@ use super::cmdline::Error as CmdlineError;
 use memory_model::{GuestAddress, GuestMemory};
 use sys_util;
 
+const PAGE_SIZE: usize = 4096;
+
 #[allow(non_camel_case_types)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 // Add here any other architecture that uses as kernel image an ELF file.
@@ -266,10 +268,11 @@ pub fn load_cmdline(
 
 /// Loads the initrd from a file into the given memory slice.
 ///
-/// * `guest_mem` - The guest memory region the initrd is written to.
+/// * `guest_mem` - The guest memory the initrd is written to.
 /// * `initrd_image` - Input initrd image.
 ///
 /// Returns the entry address of the initrd and its length as a tuple
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn load_initrd<F>(
     guest_mem: &GuestMemory,
     initrd_image: &mut F,
@@ -277,11 +280,10 @@ pub fn load_initrd<F>(
 where
     F: Read + Seek,
 {
-    let load_bytes = initrd_image
+    let initrd_size = initrd_image
         .seek(SeekFrom::End(0))
         .map_err(|_| Error::SeekInitrd)? as usize;
 
-    const PAGE_SIZE: usize = 4096;
     let align_to_pagesize = |address| address & !(PAGE_SIZE - 1);
 
     initrd_image
@@ -290,16 +292,52 @@ where
 
     let region_size: usize = guest_mem.region_size(0);
 
-    if region_size < load_bytes {
+    if region_size < initrd_size {
         return Err(Error::SizeInitrd);
     }
-    let load_addr: usize = align_to_pagesize(region_size - load_bytes);
+    let load_addr: usize = align_to_pagesize(region_size - initrd_size);
 
     guest_mem
-        .read_to_memory(GuestAddress(load_addr), initrd_image, load_bytes)
+        .read_to_memory(GuestAddress(load_addr), initrd_image, initrd_size)
         .map_err(|_| Error::ReadInitrd)?;
 
-    Ok((GuestAddress(load_addr), load_bytes))
+    Ok((GuestAddress(load_addr), initrd_size))
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn load_initrd<F>(
+    guest_mem: &GuestMemory,
+    initrd_image: &mut F,
+) -> Result<(GuestAddress, usize)>
+where
+    F: Read + Seek,
+{
+    let initrd_size = initrd_image
+        .seek(SeekFrom::End(0))
+        .map_err(|_| Error::SeekInitrd)? as usize;
+    let round_to_pagesize = |size| (size + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);
+
+    initrd_image
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| Error::SeekInitrd)?;
+
+    let load_addr;
+    match GuestAddress(arch::get_fdt_addr(&guest_mem)).checked_sub(round_to_pagesize(initrd_size)) {
+        Some(offset) => {
+            if guest_mem.address_in_range(offset) {
+                load_addr = offset.offset();
+            } else {
+                return Err(Error::SizeInitrd);
+            }
+        }
+        None => return Err(Error::SizeInitrd),
+    }
+
+    guest_mem
+        .read_to_memory(GuestAddress(load_addr), initrd_image, initrd_size)
+        .map_err(|_| Error::ReadInitrd)?;
+
+    Ok((GuestAddress(load_addr), initrd_size))
 }
 
 #[cfg(test)]
@@ -310,9 +348,18 @@ mod tests {
     use std::io::Cursor;
 
     const MEM_SIZE: usize = 0x18_0000;
+    const MEM_START: GuestAddress = GuestAddress(0x0);
+
+    fn create_guest_mem_at(at: GuestAddress, size: usize) -> GuestMemory {
+        GuestMemory::new(&[(at, size)]).unwrap()
+    }
+
+    fn create_guest_mem_with_size(size: usize) -> GuestMemory {
+        GuestMemory::new(&[(MEM_START, size)]).unwrap()
+    }
 
     fn create_guest_mem() -> GuestMemory {
-        GuestMemory::new(&[(GuestAddress(0x0), MEM_SIZE)]).unwrap()
+        create_guest_mem_with_size(MEM_SIZE)
     }
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -343,14 +390,15 @@ mod tests {
     #[test]
     // Tests that loading the initrd is successful on different archs.
     fn test_load_initrd() {
-        let gm = create_guest_mem();
         let image = make_test_bin();
-        /*
-        assert_eq!(
-            Ok((GuestAddress(load_addr), image.len())),
-            load_initrd(&gm, &mut Cursor::new(&image))
-        );
-        */
+
+        let mem_size: usize = image.len() * 2 + PAGE_SIZE;
+        #[cfg(target_arch = "aarch64")]
+        {
+            mem_size += arch::FDT_MAX_SIZE;
+        }
+
+        let gm = create_guest_mem_with_size(mem_size);
 
         let res = load_initrd(&gm, &mut Cursor::new(&image));
         assert!(res.is_ok());
@@ -361,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_load_kernel_no_memory() {
-        let gm = GuestMemory::new(&[(GuestAddress(0x0), 79)]).unwrap();
+        let gm = create_guest_mem_with_size(79);
         let image = make_test_bin();
         assert_eq!(
             Err(Error::ReadKernelImage),
@@ -371,10 +419,20 @@ mod tests {
 
     #[test]
     fn test_load_initrd_no_memory() {
-        let gm = GuestMemory::new(&[(GuestAddress(0x0), 79)]).unwrap();
+        let gm = create_guest_mem_with_size(79);
         let image = make_test_bin();
         assert_eq!(
             Err(Error::SizeInitrd),
+            load_initrd(&gm, &mut Cursor::new(&image))
+        );
+    }
+
+    #[test]
+    fn test_load_initrd_unaligned() {
+        let image = vec![1, 2, 3, 4];
+        let gm = create_guest_mem_at(GuestAddress(1), image.len() * 2);
+        assert_eq!(
+            Err(Error::ReadInitrd),
             load_initrd(&gm, &mut Cursor::new(&image))
         );
     }
