@@ -1337,17 +1337,17 @@ impl Vmm {
         // having set the vcpu count.
         let vcpu_count = self.vm_config.vcpu_count.ok_or(VcpusNotConfigured)?;
 
+        let initrd_file: &mut Option<File> = &mut kernel_config.initrd_file;
+
+        let (initrd_addr, initrd_size) = if let Some(ref mut initrd_file) = initrd_file {
+            kernel_loader::load_initrd(vm_memory, initrd_file)
+                .map_err(|e| StartMicrovmError::KernelLoader(e))?
+        } else {
+            (GuestAddress(0), 0)
+        };
+
         #[cfg(target_arch = "x86_64")]
         {
-            let initrd_file: &mut Option<File> = &mut kernel_config.initrd_file;
-
-            let (initrd_addr, initrd_size) = if let Some(ref mut initrd_file) = initrd_file {
-                kernel_loader::load_initrd(vm_memory, initrd_file)
-                    .map_err(|e| StartMicrovmError::KernelLoader(e))?
-            } else {
-                (GuestAddress(0), 0)
-            };
-
             arch::x86_64::configure_system(
                 vm_memory,
                 kernel_config.cmdline_addr,
@@ -1369,6 +1369,8 @@ impl Vmm {
                     .map_err(LoadCommandline)?,
                 vcpu_count,
                 self.get_mmio_device_info(),
+                initrd_addr,
+                initrd_size,
             )
             .map_err(ConfigureSystem)?;
         }

@@ -80,6 +80,8 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
     num_cpus: u32,
     cmdline: &CStr,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
+    initrd_start: GuestAddress,
+    initrd_size: usize,
 ) -> Result<(Vec<u8>)> {
     // Alocate stuff necessary for the holding the blob.
     let mut fdt = vec![0; FDT_MAX_SIZE];
@@ -102,7 +104,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
     append_property_u32(&mut fdt, "interrupt-parent", GIC_PHANDLE)?;
     create_cpu_nodes(&mut fdt, num_cpus)?;
     create_memory_node(&mut fdt, guest_mem)?;
-    create_chosen_node(&mut fdt, cmdline)?;
+    create_chosen_node(&mut fdt, cmdline, initrd_start.offset() as u64, initrd_size)?;
     create_gic_node(&mut fdt, u64::from(num_cpus))?;
     create_timer_node(&mut fdt)?;
     create_clock_node(&mut fdt)?;
@@ -336,9 +338,16 @@ fn create_memory_node(fdt: &mut Vec<u8>, guest_mem: &GuestMemory) -> Result<()> 
     Ok(())
 }
 
-fn create_chosen_node(fdt: &mut Vec<u8>, cmdline: &CStr) -> Result<()> {
+fn create_chosen_node(
+    fdt: &mut Vec<u8>,
+    cmdline: &CStr,
+    initrd_addr: u64,
+    initrd_size: usize,
+) -> Result<()> {
     append_begin_node(fdt, "chosen")?;
     append_property_cstring(fdt, "bootargs", cmdline)?;
+    append_property_u64(fdt, "linux,initrd-start", initrd_start)?;
+    append_property_u64(fdt, "linux,initrd-end", (initrd_start as u64) + initrd_size)?;
     append_end_node(fdt)?;
 
     Ok(())

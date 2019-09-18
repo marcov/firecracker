@@ -47,9 +47,18 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     cmdline_cstring: &CStr,
     num_cpus: u8,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
+    initrd_addr: GuestAddress,
+    initrd_size: usize,
 ) -> super::Result<()> {
-    fdt::create_fdt(guest_mem, u32::from(num_cpus), cmdline_cstring, device_info)
-        .map_err(Error::SetupFDT)?;
+    fdt::create_fdt(
+        guest_mem,
+        u32::from(num_cpus),
+        cmdline_cstring,
+        device_info,
+        initrd_start,
+        initrd_size,
+    )
+    .map_err(Error::SetupFDT)?;
     Ok(())
 }
 

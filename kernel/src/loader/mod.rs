@@ -266,10 +266,11 @@ pub fn load_cmdline(
 
 /// Loads the initrd from a file into the given memory slice.
 ///
-/// * `guest_mem` - The guest memory region the initrd is written to.
+/// * `guest_mem` - The guest memory the initrd is written to.
 /// * `initrd_image` - Input initrd image.
 ///
 /// Returns the entry address of the initrd and its length as a tuple
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn load_initrd<F>(
     guest_mem: &GuestMemory,
     initrd_image: &mut F,
@@ -294,6 +295,41 @@ where
         return Err(Error::SizeInitrd);
     }
     let load_addr: usize = align_to_pagesize(region_size - load_bytes);
+
+    guest_mem
+        .read_to_memory(GuestAddress(load_addr), initrd_image, load_bytes)
+        .map_err(|_| Error::ReadInitrd)?;
+
+    Ok((GuestAddress(load_addr), load_bytes))
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn load_initrd<F>(
+    guest_mem: &GuestMemory,
+    initrd_image: &mut F,
+) -> Result<(GuestAddress, usize)>
+where
+    F: Read + Seek,
+{
+    let load_bytes = initrd_image
+        .seek(SeekFrom::End(0))
+        .map_err(|_| Error::SeekInitrd)? as usize;
+
+    const PAGE_SIZE: usize = 4096;
+    let align_to_pagesize = |address| address & !(PAGE_SIZE - 1);
+
+    initrd_image
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| Error::SeekInitrd)?;
+
+    let fdt_address = GuestAddress(get_fdt_addr(&guest_mem)).offset();
+
+    let load_addr: usize = align_to_pagesize(fdt_address - load_bytes);
+
+    // loose overlap check
+    if arch::get_kernel_start() > load_addr - load_bytes {
+        return Err(Error::SizeInitrd);
+    }
 
     guest_mem
         .read_to_memory(GuestAddress(load_addr), initrd_image, load_bytes)
