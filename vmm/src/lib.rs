@@ -3469,7 +3469,7 @@ mod tests {
             .write_all(b"This is a nice initrd")
             .expect("Cannot write temporary initrd file");
         let initrd_path = String::from(initrd_temp_file.path().to_path_buf().to_str().unwrap());
-        let initrd_file = File::open(initrd_path).expect("Cannot open kernel file");
+        let initrd_file = File::open(initrd_path).expect("Cannot open initrd file");
 
         vmm.kernel_config = {
             let cfg = vmm.kernel_config.unwrap();
@@ -3487,6 +3487,37 @@ mod tests {
 
         assert!(vmm.configure_system().is_ok());
         vmm.stdin_handle.lock().set_canon_mode().unwrap();
+    }
+
+    #[test]
+    fn test_configure_system_with_empty_initrd() {
+        let mut vmm = create_vmm_object(InstanceState::Uninitialized);
+        vmm.default_kernel_config(None);
+
+        let initrd_temp_file =
+            NamedTempFile::new().expect("Failed to create temporary initrd file.");
+        let initrd_path = String::from(initrd_temp_file.path().to_path_buf().to_str().unwrap());
+        let initrd_file = File::open(initrd_path).expect("Cannot open initrd file");
+
+        vmm.kernel_config = {
+            let cfg = vmm.kernel_config.unwrap();
+            Some(KernelConfig {
+                kernel_file: cfg.kernel_file,
+                initrd_file: Some(initrd_file),
+                cmdline: cfg.cmdline,
+                #[cfg(target_arch = "x86_64")]
+                cmdline_addr: cfg.cmdline_addr,
+            })
+        };
+
+        assert!(vmm.init_guest_memory().is_ok());
+        assert!(vmm.vm.get_memory().is_some());
+
+        assert!(vmm
+            .configure_system()
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to read initrd image"));
     }
 
     #[test]

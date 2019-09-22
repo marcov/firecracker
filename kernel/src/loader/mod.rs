@@ -290,7 +290,7 @@ where
         .seek(SeekFrom::Start(0))
         .map_err(|_| Error::SeekInitrd)?;
 
-    let region_size: usize = guest_mem.region_size(0);
+    let region_size: usize = guest_mem.region_size(0).map_err(|_| Error::ReadInitrd)?;
 
     if region_size < initrd_size {
         return Err(Error::SizeInitrd);
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn test_load_initrd_unaligned() {
         let image = vec![1, 2, 3, 4];
-        let gm = create_guest_mem_at(GuestAddress(1), image.len() * 2);
+        let gm = create_guest_mem_at(GuestAddress(PAGE_SIZE + 1), image.len() * 2);
         assert_eq!(
             Err(Error::ReadInitrd),
             load_initrd(&gm, &mut Cursor::new(&image))
