@@ -45,7 +45,7 @@ mod vstate;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::io::{Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::process;
@@ -100,7 +100,7 @@ use vmm_config::net::{
 use vmm_config::vsock::{VsockDeviceConfig, VsockError};
 use vstate::{KvmContext, Vcpu, Vm};
 
-pub use error::{ErrorKind, StartMicrovmError, VmmActionError};
+pub use error::{ErrorKind, LoadInitrdError, StartMicrovmError, VmmActionError};
 
 const WRITE_METRICS_PERIOD_SECONDS: u64 = 60;
 
@@ -1004,6 +1004,46 @@ impl Vmm {
         Ok(entry_addr)
     }
 
+    /// Loads the initrd from a file into the given memory slice.
+    ///
+    /// * `image` - Input initrd image.
+    /// * `vm_memory` - The guest memory the initrd is written to.
+    ///
+    /// Returns the result of initrd loading
+    fn load_initrd<F>(
+        vm_memory: &GuestMemory,
+        image: &mut F,
+    ) -> std::result::Result<InitrdInfo, LoadInitrdError>
+    where
+        F: Read + Seek,
+    {
+        use LoadInitrdError::*;
+
+        let size: usize;
+        match image.seek(SeekFrom::End(0)) {
+            Ok(0) | Err(..) => return Err(ReadInitrd),
+            Ok(s) => size = s as usize,
+        };
+
+        let address = arch::initrd_load_addr(vm_memory, size);
+        if address.is_err() {
+            return Err(LoadInitrd);
+        }
+
+        let addr = address.unwrap();
+
+        image.seek(SeekFrom::Start(0)).map_err(|_| ReadInitrd)?;
+
+        vm_memory
+            .read_to_memory(GuestAddress(addr), image, size)
+            .map_err(|_| LoadInitrd)?;
+
+        Ok(InitrdInfo {
+            address: GuestAddress(addr),
+            size: size,
+        })
+    }
+
     fn configure_system(&self, vcpus: &[Vcpu]) -> std::result::Result<(), StartMicrovmError> {
         use StartMicrovmError::*;
 
@@ -1016,15 +1056,12 @@ impl Vmm {
 
         let initrd = match &kernel_config.initrd_file {
             Some(f) => {
-                let initrd = f.try_clone();
-                if initrd.is_err() {
-                    return Err(StartMicrovmError::InitrdLoader(
-                        kernel::loader::Error::ReadInitrd,
-                    ));
+                let initrd_file = f.try_clone();
+                if initrd_file.is_err() {
+                    return Err(InitrdLoader(LoadInitrdError::ReadInitrd));
                 }
 
-                kernel_loader::load_initrd(vm_memory, &mut initrd.unwrap())
-                    .map_err(StartMicrovmError::InitrdLoader)?
+                Vmm::load_initrd(vm_memory, &mut initrd_file.unwrap())?
             }
             None => InitrdInfo {
                 address: GuestAddress(0),

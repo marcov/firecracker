@@ -42,12 +42,15 @@ pub enum Error {
     ZeroPagePastRamEnd,
     /// Error writing the zero page of guest memory.
     ZeroPageSetup,
+    /// Failed to compute initrd address.
+    InitrdAddress,
 }
 
 // Where BIOS/VGA magic would live on a real PC.
 const EBDA_START: u64 = 0x9fc00;
 const FIRST_ADDR_PAST_32BITS: usize = (1 << 32);
 const MEM_32BIT_GAP_SIZE: usize = (768 << 20);
+const PAGE_SIZE: usize = 4096;
 
 /// Returns a Vec of the valid memory addresses.
 /// These should be used to configure the GuestMemory structure for the platform.
@@ -85,6 +88,18 @@ pub fn get_32bit_gap_start() -> usize {
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> usize {
     layout::HIMEM_START
+}
+
+/// Returns the memory address where the initrd could be loaded.
+pub fn initrd_load_addr(guest_mem: &GuestMemory, initrd_size: usize) -> super::Result<usize> {
+    let align_to_pagesize = |address| address & !(PAGE_SIZE - 1);
+    let region_size: usize = guest_mem.region_size(0).map_err(|_| Error::InitrdAddress)?;
+
+    if region_size < initrd_size {
+        return Err(Error::InitrdAddress);
+    }
+
+    return Ok(align_to_pagesize(region_size - initrd_size));
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.

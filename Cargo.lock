@@ -218,7 +218,6 @@ dependencies = [
 name = "kernel"
 version = "0.1.0"
 dependencies = [
- "arch",
  "memory_model",
  "utils",
 ]

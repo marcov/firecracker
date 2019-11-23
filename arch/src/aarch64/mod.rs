@@ -24,6 +24,8 @@ use memory_model::{Address, GuestAddress, GuestMemory};
 pub enum Error {
     /// Failed to create a Flattened Device Tree for this aarch64 microVM.
     SetupFDT(fdt::Error),
+    /// Failed to compute initrd address.
+    InitrdAddress,
 }
 
 pub use self::fdt::DeviceInfoForFDT;
@@ -75,6 +77,22 @@ pub fn get_reserved_mem_addr() -> u64 {
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> usize {
     layout::DRAM_MEM_START
+}
+
+/// Returns the memory address where the initrd could be loaded.
+pub fn initrd_load_addr(guest_mem: &GuestMemory, initrd_size: usize) -> Result<usize> {
+    match GuestAddress(arch::aarch64::get_fdt_addr(&guest_mem))
+        .checked_sub(round_to_pagesize(initrd_size))
+    {
+        Some(offset) => {
+            if guest_mem.address_in_range(offset) {
+                return Ok(offset.raw_value());
+            } else {
+                return Err(Error::LoadInitrd);
+            }
+        }
+        None => return Err(Error::LoadInitrd),
+    }
 }
 
 /// Returns the memory address where the flattened device tree blob is loaded.

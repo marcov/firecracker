@@ -13,12 +13,9 @@ use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 use std::mem;
 
-use super::arch::InitrdInfo;
 use super::cmdline::Error as CmdlineError;
 use memory_model::{Address, GuestAddress, GuestMemory};
 use utils::structs::{read_struct, read_struct_slice};
-
-const PAGE_SIZE: usize = 4096;
 
 #[allow(non_camel_case_types)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -33,8 +30,6 @@ pub enum Error {
     InvalidProgramHeaderSize,
     InvalidProgramHeaderOffset,
     InvalidProgramHeaderAddress,
-    ReadInitrd,
-    LoadInitrd,
     ReadKernelDataStruct(&'static str),
     ReadKernelImage,
     SeekKernelStart,
@@ -54,8 +49,6 @@ impl fmt::Display for Error {
                 Error::InvalidProgramHeaderSize => "Invalid ELF program header size",
                 Error::InvalidProgramHeaderOffset => "Invalid ELF program header offset",
                 Error::InvalidProgramHeaderAddress => "Invalid ELF program header address",
-                Error::LoadInitrd => "Failed to load initrd image to guest memory",
-                Error::ReadInitrd => "Failed to read initrd image",
                 Error::ReadKernelDataStruct(ref e) => e,
                 Error::ReadKernelImage => "Failed to write kernel image to guest memory",
                 Error::SeekKernelStart => {
@@ -263,87 +256,6 @@ pub fn load_cmdline(
         .map_err(|_| CmdlineError::CommandLineCopy)?;
 
     Ok(())
-}
-
-/// Loads the initrd from a file into the given memory slice.
-///
-/// * `guest_mem` - The guest memory the initrd is written to.
-/// * `initrd_image` - Input initrd image.
-///
-/// Returns the entry address of the initrd and its length as a tuple
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-pub fn load_initrd<F>(guest_mem: &GuestMemory, initrd_image: &mut F) -> Result<InitrdInfo>
-where
-    F: Read + Seek,
-{
-    let initrd_size: usize;
-    match initrd_image.seek(SeekFrom::End(0)) {
-        Ok(0) | Err(..) => return Err(Error::ReadInitrd),
-        Ok(s) => initrd_size = s as usize,
-    };
-
-    let align_to_pagesize = |address| address & !(PAGE_SIZE - 1);
-
-    initrd_image
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| Error::ReadInitrd)?;
-
-    let region_size: usize = guest_mem.region_size(0).map_err(|_| Error::LoadInitrd)?;
-
-    if region_size < initrd_size {
-        return Err(Error::LoadInitrd);
-    }
-    let load_addr: usize = align_to_pagesize(region_size - initrd_size);
-
-    guest_mem
-        .read_to_memory(GuestAddress(load_addr), initrd_image, initrd_size)
-        .map_err(|_| Error::LoadInitrd)?;
-
-    Ok(InitrdInfo {
-        address: GuestAddress(load_addr),
-        size: initrd_size,
-    })
-}
-
-#[cfg(target_arch = "aarch64")]
-pub fn load_initrd<F>(guest_mem: &GuestMemory, initrd_image: &mut F) -> Result<InitrdInfo>
-where
-    F: Read + Seek,
-{
-    let initrd_size: usize;
-    match initrd_image.seek(SeekFrom::End(0)) {
-        Ok(0) | Err(..) => return Err(Error::ReadInitrd),
-        Ok(s) => initrd_size = s as usize,
-    };
-
-    let round_to_pagesize = |size| (size + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);
-
-    initrd_image
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| Error::ReadInitrd)?;
-
-    let load_addr;
-    match GuestAddress(arch::aarch64::get_fdt_addr(&guest_mem))
-        .checked_sub(round_to_pagesize(initrd_size))
-    {
-        Some(offset) => {
-            if guest_mem.address_in_range(offset) {
-                load_addr = offset.raw_value()
-            } else {
-                return Err(Error::LoadInitrd);
-            }
-        }
-        None => return Err(Error::LoadInitrd),
-    }
-
-    guest_mem
-        .read_to_memory(GuestAddress(load_addr), initrd_image, initrd_size)
-        .map_err(|_| Error::LoadInitrd)?;
-
-    Ok(InitrdInfo {
-        address: GuestAddress(load_addr),
-        size: initrd_size,
-    })
 }
 
 #[cfg(test)]
