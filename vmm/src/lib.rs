@@ -1040,7 +1040,7 @@ impl Vmm {
 
         Ok(InitrdInfo {
             address: GuestAddress(addr),
-            size: size,
+            size,
         })
     }
 
@@ -1717,6 +1717,8 @@ impl Vmm {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     macro_rules! assert_match {
         ($x:expr, $y:pat) => {{
             if let $y = $x {
@@ -2894,6 +2896,62 @@ mod tests {
         assert!(vmm.load_kernel().is_ok());
     }
 
+    const MEM_START: GuestAddress = GuestAddress(0x0);
+    const PAGE_SIZE: usize = 4096;
+
+    fn create_guest_mem_at(at: GuestAddress, size: usize) -> GuestMemory {
+        GuestMemory::new(&[(at, size)]).unwrap()
+    }
+
+    fn create_guest_mem_with_size(size: usize) -> GuestMemory {
+        GuestMemory::new(&[(MEM_START, size)]).unwrap()
+    }
+
+    fn make_test_bin() -> Vec<u8> {
+        let mut fake_bin = Vec::new();
+        fake_bin.resize(1_000_000, 0xAA);
+        fake_bin
+    }
+
+    #[test]
+    // Tests that loading the initrd is successful on different archs.
+    fn test_load_initrd() {
+        let image = make_test_bin();
+
+        let mem_size: usize = image.len() * 2 + PAGE_SIZE;
+
+        #[cfg(target_arch = "x86_64")]
+        let gm = create_guest_mem_with_size(mem_size);
+
+        #[cfg(target_arch = "aarch64")]
+        let gm = create_guest_mem_with_size(mem_size + arch::aarch64::layout::FDT_MAX_SIZE);
+
+        let res = Vmm::load_initrd(&gm, &mut Cursor::new(&image));
+        assert!(res.is_ok());
+        let initrd = res.unwrap();
+        assert!(gm.address_in_range(initrd.address));
+        assert_eq!(initrd.size, image.len());
+    }
+
+    #[test]
+    fn test_load_initrd_no_memory() {
+        let gm = create_guest_mem_with_size(79);
+        let image = make_test_bin();
+        let res = Vmm::load_initrd(&gm, &mut Cursor::new(&image));
+        assert!(res.is_err());
+        assert_eq!(LoadInitrdError::LoadInitrd, res.err().unwrap());
+    }
+
+    #[test]
+    fn test_load_initrd_unaligned() {
+        let image = vec![1, 2, 3, 4];
+        let gm = create_guest_mem_at(GuestAddress(PAGE_SIZE + 1), image.len() * 2);
+
+        let res = Vmm::load_initrd(&gm, &mut Cursor::new(&image));
+        assert!(res.is_err());
+        assert_eq!(LoadInitrdError::LoadInitrd, res.err().unwrap());
+    }
+
     #[test]
     #[should_panic(expected = "Cannot configure registers prior to allocating memory!")]
     fn test_configure_system_no_mem() {
@@ -2992,7 +3050,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            StartMicrovmError::InitrdLoader(kernel_loader::Error::ReadInitrd).to_string()
+            StartMicrovmError::InitrdLoader(LoadInitrdError::ReadInitrd).to_string()
         );
     }
 

@@ -268,10 +268,6 @@ mod tests {
     const MEM_SIZE: usize = 0x18_0000;
     const MEM_START: GuestAddress = GuestAddress(0x0);
 
-    fn create_guest_mem_at(at: GuestAddress, size: usize) -> GuestMemory {
-        GuestMemory::new(&[(at, size)]).unwrap()
-    }
-
     fn create_guest_mem_with_size(size: usize) -> GuestMemory {
         GuestMemory::new(&[(MEM_START, size)]).unwrap()
     }
@@ -302,64 +298,6 @@ mod tests {
         assert_eq!(
             Ok(GuestAddress(load_addr)),
             load_kernel(&gm, &mut Cursor::new(&image), 0)
-        );
-    }
-
-    #[test]
-    // Tests that loading the initrd is successful on different archs.
-    fn test_load_initrd() {
-        let image = make_test_bin();
-
-        let mem_size: usize = image.len() * 2 + PAGE_SIZE;
-
-        #[cfg(target_arch = "x86_64")]
-        let gm = create_guest_mem_with_size(mem_size);
-
-        #[cfg(target_arch = "aarch64")]
-        let gm = create_guest_mem_with_size(mem_size + arch::aarch64::layout::FDT_MAX_SIZE);
-
-        let res = load_initrd(&gm, &mut Cursor::new(&image));
-        assert!(res.is_ok());
-        let initrd = res.unwrap();
-        assert!(gm.address_in_range(initrd.address));
-        assert_eq!(initrd.size, image.len());
-    }
-
-    #[test]
-    fn test_load_kernel_no_memory() {
-        let gm = create_guest_mem_with_size(79);
-        let image = make_test_bin();
-        assert_eq!(
-            Err(Error::ReadKernelImage),
-            load_kernel(&gm, &mut Cursor::new(&image), 0)
-        );
-    }
-
-    #[test]
-    fn test_load_initrd_no_memory() {
-        let gm = create_guest_mem_with_size(79);
-        let image = make_test_bin();
-        assert_eq!(
-            Err(Error::LoadInitrd),
-            load_initrd(&gm, &mut Cursor::new(&image))
-        );
-    }
-
-    #[test]
-    fn test_load_initrd_unaligned() {
-        let image = vec![1, 2, 3, 4];
-        let gm = create_guest_mem_at(GuestAddress(PAGE_SIZE + 1), image.len() * 2);
-
-        #[cfg(target_arch = "aarch64")]
-        assert_eq!(
-            Err(Error::LoadInitrd),
-            load_initrd(&gm, &mut Cursor::new(&image))
-        );
-
-        #[cfg(target_arch = "x86_64")]
-        assert_eq!(
-            Err(Error::LoadInitrd),
-            load_initrd(&gm, &mut Cursor::new(&image))
         );
     }
 

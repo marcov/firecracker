@@ -99,7 +99,7 @@ pub fn initrd_load_addr(guest_mem: &GuestMemory, initrd_size: usize) -> super::R
         return Err(Error::InitrdAddress);
     }
 
-    return Ok(align_to_pagesize(region_size - initrd_size));
+    Ok(align_to_pagesize(region_size - initrd_size))
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -238,7 +238,11 @@ mod tests {
     fn test_system_configuration() {
         let no_vcpus = 4;
         let gm = GuestMemory::new(&[(GuestAddress(0), 0x10000)]).unwrap();
-        let config_err = configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, 1);
+        let initrd = InitrdInfo {
+            address: GuestAddress(0),
+            size: 0,
+        };
+        let config_err = configure_system(&gm, GuestAddress(0), 0, &initrd, 1);
         assert!(config_err.is_err());
         assert_eq!(
             config_err.unwrap_err(),
@@ -249,19 +253,19 @@ mod tests {
         let mem_size = 128 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, &initrd, no_vcpus).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, &initrd, no_vcpus).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemory::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, &initrd, no_vcpus).unwrap();
     }
 
     #[test]

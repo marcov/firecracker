@@ -647,7 +647,7 @@ mod tests {
         let gic = create_gic(&vm, 1).unwrap();
         let initrd = InitrdInfo {
             address: GuestAddress(0x10000000),
-            size 0x1000,
+            size: 0x1000,
         };
 
         let mut dtb = create_fdt(
@@ -656,7 +656,7 @@ mod tests {
             &CString::new("console=tty0").unwrap(),
             None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
             &gic,
-            &initrd
+            &initrd,
         )
         .unwrap();
 

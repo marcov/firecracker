@@ -72,7 +72,7 @@ impl std::fmt::Debug for Error {
 }
 
 /// Errors associated with loading initrd
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LoadInitrdError {
     /// Cannot load initd due to invalid memory configuration.
     LoadInitrd,
@@ -80,7 +80,7 @@ pub enum LoadInitrdError {
     ReadInitrd,
 }
 
-/// It's convenient to automatically convert `kernel::cmdline::Error`s
+/// It's convenient to automatically convert `LoadInitrdError`s
 /// to `StartMicrovmError`s.
 impl std::convert::From<LoadInitrdError> for StartMicrovmError {
     fn from(e: LoadInitrdError) -> StartMicrovmError {
