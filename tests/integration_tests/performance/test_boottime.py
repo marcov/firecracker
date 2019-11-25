@@ -90,7 +90,7 @@ def test_single_microvm_net_initrd_boottime(
     log_fifo, _tap = _configure_vm(test_microvm_with_initrd, {
         "config": network_config, "iface_id": "1"
     }, initrd=True)
-    time.sleep(2)
+    time.sleep(0.4)
     boottime_us = _test_microvm_boottime(
         log_fifo, max_time_us=(MAX_BOOT_TIME_US +
                                INITRD_BOOT_TIME_OVERHEAD_US))
@@ -102,7 +102,7 @@ def test_single_microvm_initrd_boottime(
         test_microvm_with_initrd):
     """Check guest boottime of microvm with network."""
     log_fifo, _tap = _configure_vm(test_microvm_with_initrd, initrd=True)
-    time.sleep(2)
+    time.sleep(0.4)
     boottime_us = _test_microvm_boottime(
         log_fifo, max_time_us=(MAX_BOOT_TIME_US +
                                INITRD_BOOT_TIME_OVERHEAD_US))
