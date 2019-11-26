@@ -13,6 +13,7 @@ use std::ptr::null;
 use std::{io, result};
 
 use super::super::DeviceType;
+use super::super::InitrdInfo;
 use super::get_fdt_addr;
 use super::gic::GICDevice;
 use super::layout::FDT_MAX_SIZE;
@@ -345,9 +346,13 @@ fn create_memory_node(fdt: &mut Vec<u8>, guest_mem: &GuestMemory) -> Result<()> 
 fn create_chosen_node(fdt: &mut Vec<u8>, cmdline: &CStr, initrd: &InitrdInfo) -> Result<()> {
     append_begin_node(fdt, "chosen")?;
     append_property_cstring(fdt, "bootargs", cmdline)?;
-    if initrd_size > 0 {
-        append_property_u64(fdt, "linux,initrd-start", initrd.address)?;
-        append_property_u64(fdt, "linux,initrd-end", initrd.address + initrd.size as u64)?;
+    if initrd.size > 0 {
+        append_property_u64(fdt, "linux,initrd-start", initrd.address.raw_value() as u64)?;
+        append_property_u64(
+            fdt,
+            "linux,initrd-end",
+            (initrd.address.raw_value() + initrd.size) as u64,
+        )?;
     }
     append_end_node(fdt)?;
 
@@ -580,14 +585,17 @@ mod tests {
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
+        let initrd = super::InitrdInfo {
+            address: GuestAddress(0),
+            size: 0,
+        };
         assert!(create_fdt(
             &mem,
             vec![0],
             &CString::new("console=tty0").unwrap(),
             Some(&dev_info),
             &gic,
-            GuestAddress(0),
-            0,
+            &initrd,
         )
         .is_ok())
     }
@@ -599,14 +607,17 @@ mod tests {
         let kvm = Kvm::new().unwrap();
         let vm = kvm.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
+        let initrd = super::InitrdInfo {
+            address: GuestAddress(0),
+            size: 0,
+        };
         let mut dtb = create_fdt(
             &mem,
             vec![0],
             &CString::new("console=tty0").unwrap(),
             None::<&std::collections::HashMap<(DeviceType, std::string::String), MMIODeviceInfo>>,
             &gic,
-            GuestAddress(0),
-            0,
+            &initrd,
         )
         .unwrap();
 

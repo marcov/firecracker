@@ -2897,7 +2897,6 @@ mod tests {
     }
 
     const MEM_START: GuestAddress = GuestAddress(0x0);
-    const PAGE_SIZE: usize = 4096;
 
     fn create_guest_mem_at(at: GuestAddress, size: usize) -> GuestMemory {
         GuestMemory::new(&[(at, size)]).unwrap()
@@ -2918,7 +2917,7 @@ mod tests {
     fn test_load_initrd() {
         let image = make_test_bin();
 
-        let mem_size: usize = image.len() * 2 + PAGE_SIZE;
+        let mem_size: usize = image.len() * 2 + arch::PAGE_SIZE;
 
         #[cfg(target_arch = "x86_64")]
         let gm = create_guest_mem_with_size(mem_size);
@@ -2945,7 +2944,7 @@ mod tests {
     #[test]
     fn test_load_initrd_unaligned() {
         let image = vec![1, 2, 3, 4];
-        let gm = create_guest_mem_at(GuestAddress(PAGE_SIZE + 1), image.len() * 2);
+        let gm = create_guest_mem_at(GuestAddress(arch::PAGE_SIZE + 1), image.len() * 2);
 
         let res = Vmm::load_initrd(&gm, &mut Cursor::new(&image));
         assert!(res.is_err());

@@ -24,7 +24,7 @@ use memory_model::{Address, GuestAddress, GuestMemory};
 pub enum Error {
     /// Failed to create a Flattened Device Tree for this aarch64 microVM.
     SetupFDT(fdt::Error),
-    /// Failed to compute initrd address.
+    /// Failed to compute the initrd address.
     InitrdAddress,
 }
 
@@ -53,8 +53,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     vcpu_mpidr: Vec<u64>,
     device_info: Option<&HashMap<(DeviceType, String), T>>,
     gic_device: &Box<dyn GICDevice>,
-    initrd_addr: GuestAddress,
-    initrd_size: usize,
+    initrd: &super::InitrdInfo,
 ) -> super::Result<()> {
     fdt::create_fdt(
         guest_mem,
@@ -62,8 +61,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
         cmdline_cstring,
         device_info,
         gic_device,
-        initrd_addr,
-        initrd_size,
+        initrd,
     )
     .map_err(Error::SetupFDT)?;
     Ok(())
@@ -80,18 +78,17 @@ pub fn get_kernel_start() -> usize {
 }
 
 /// Returns the memory address where the initrd could be loaded.
-pub fn initrd_load_addr(guest_mem: &GuestMemory, initrd_size: usize) -> Result<usize> {
-    match GuestAddress(arch::aarch64::get_fdt_addr(&guest_mem))
-        .checked_sub(round_to_pagesize(initrd_size))
-    {
+pub fn initrd_load_addr(guest_mem: &GuestMemory, initrd_size: usize) -> super::Result<usize> {
+    let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
+    match GuestAddress(get_fdt_addr(&guest_mem)).checked_sub(round_to_pagesize(initrd_size)) {
         Some(offset) => {
             if guest_mem.address_in_range(offset) {
                 return Ok(offset.raw_value());
             } else {
-                return Err(Error::LoadInitrd);
+                return Err(Error::InitrdAddress);
             }
         }
-        None => return Err(Error::LoadInitrd),
+        None => return Err(Error::InitrdAddress),
     }
 }
 
